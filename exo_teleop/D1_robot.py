@@ -1,4 +1,5 @@
 import threading
+import time
 import traceback
 
 import numpy as np
@@ -27,6 +28,10 @@ class D1Robot:
         # Vision thread control
         self._vision_thread = None
         self._vision_stop_event = None
+        self._vision_lock = threading.Lock()
+        self._latest_color_rgb = None
+        self._latest_depth_m = None
+        self._latest_vision_ts = 0.0
 
     def start_vision_thread(
         self,
@@ -49,6 +54,10 @@ class D1Robot:
                 with self.vision as camera:
                     while not self._vision_stop_event.is_set():
                         color_rgb, depth_m = camera.get_aligned_frames(filtered=filtered)
+                        with self._vision_lock:
+                            self._latest_color_rgb = color_rgb.copy()
+                            self._latest_depth_m = depth_m.copy()
+                            self._latest_vision_ts = time.time()
 
                         # RGB: convert to BGR for OpenCV
                         color_bgr = cv2.cvtColor(color_rgb, cv2.COLOR_RGB2BGR)
@@ -95,6 +104,16 @@ class D1Robot:
             daemon=True,
         )
         self._vision_thread.start()
+
+    def get_latest_vision_frames(self):
+        with self._vision_lock:
+            if self._latest_color_rgb is None or self._latest_depth_m is None:
+                return None, None, 0.0
+            return (
+                self._latest_color_rgb.copy(),
+                self._latest_depth_m.copy(),
+                float(self._latest_vision_ts),
+            )
 
     def stop_vision_thread(self, join_timeout: float = 2.0):
         """
